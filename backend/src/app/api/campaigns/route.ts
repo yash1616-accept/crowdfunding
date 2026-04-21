@@ -17,9 +17,9 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const data = await req.json();
-    const { creatorId, hook, blueprint, fundingGoal, milestones, stretchGoals } = data;
+    const { creatorId, creatorName, contactEmail, category, hook, blueprint, fundingGoal, milestones, stretchGoals, status } = data;
 
-    if (!creatorId || !hook || !blueprint || !fundingGoal) {
+    if (!creatorId || !creatorName || !hook || !blueprint || !fundingGoal) {
       return NextResponse.json({ error: 'Missing core campaign schematics' }, { status: 400 });
     }
 
@@ -27,9 +27,13 @@ export async function POST(req: Request) {
 
     const newCampaign = new Campaign({
       creatorId,
+      creatorName,
+      contactEmail: contactEmail || '',
+      category: category || 'Other',
       hook,
       blueprint,
       fundingGoal,
+      status: status || 'Draft',
       milestones: milestones || [],
       stretchGoals: stretchGoals || []
     });
