@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { apiUrl } from '../lib/api';
 import { Rocket, Target, Activity, Cpu, Wallet, Banknote, CreditCard, Loader2, Info, LayoutList, ArrowUpRight } from 'lucide-react';
 import { useUser, useAuth } from '@clerk/clerk-react';
 
@@ -38,7 +39,7 @@ function DashboardContent() {
   const [authToken, setAuthToken] = useState<string>('');
   const [myCampaigns, setMyCampaigns] = useState<any[]>([]);
   const [loadingCampaigns, setLoadingCampaigns] = useState(true);
-  
+
   // Campaign Form State
   const [hook, setHook] = useState('');
   const [blueprint, setBlueprint] = useState('');
@@ -87,7 +88,7 @@ function DashboardContent() {
   // Network Heartbeat
   useEffect(() => {
     if (!authToken) return;
-    fetch('/api/campaigns', { headers: { Authorization: `Bearer ${authToken}` } })
+    fetch(apiUrl('/api/campaigns'), { headers: { Authorization: `Bearer ${authToken}` } })
       .then(res => res.ok ? setNetworkStatus("API: Connected") : setNetworkStatus("API: Unstable"))
       .catch(() => setNetworkStatus("API: Offline"));
   }, [authToken]);
@@ -96,21 +97,21 @@ function DashboardContent() {
   useEffect(() => {
     if (!user?.id || !authToken) return;
     setLoadingCampaigns(true);
-    fetch('/api/campaigns/me', {
-       headers: { 
-         Authorization: `Bearer ${authToken}`,
-         'x-user-id': user.id
-       }
+    fetch(apiUrl('/api/campaigns/me'), {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+        'x-user-id': user.id
+      }
     })
-    .then(r => r.json())
-    .then(data => {
-       setMyCampaigns(data.campaigns || []);
-       setLoadingCampaigns(false);
-    })
-    .catch(e => {
+      .then(r => r.json())
+      .then(data => {
+        setMyCampaigns(data.campaigns || []);
+        setLoadingCampaigns(false);
+      })
+      .catch(e => {
         addLog(`Error syncing projects: ${e.message}`);
         setLoadingCampaigns(false);
-    });
+      });
   }, [user?.id, authToken]);
 
   // Derived Stats
@@ -125,9 +126,9 @@ function DashboardContent() {
     setAiOutput('');
     try {
       const token = await getToken();
-      const res = await fetch('/api/generate', {
+      const res = await fetch(apiUrl('/api/generate'), {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {})
         },
@@ -149,22 +150,22 @@ function DashboardContent() {
 
     const creatorRole = user?.publicMetadata?.role || 'Creator';
     if (creatorRole !== 'Creator') {
-       addLog('Access Denied. Only Creators can deploy blueprints.');
-       return;
+      addLog('Access Denied. Only Creators can deploy blueprints.');
+      return;
     }
-    
+
     setIsSubmitting(true);
     addLog(`Deploying campaign "${hook}"...`);
-    
+
     try {
       const token = await getToken();
-      const res = await fetch('/api/campaigns', {
-        method: 'POST', 
-        headers: { 
+      const res = await fetch(apiUrl('/api/campaigns'), {
+        method: 'POST',
+        headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}` 
+          'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           creatorId: user?.id || '650000000000000000000000',
           creatorName: displayName || user?.username || user?.firstName || 'Creator',
           contactEmail: contactEmail || user?.primaryEmailAddress?.emailAddress || '',
@@ -173,15 +174,15 @@ function DashboardContent() {
           blueprint,
           fundingGoal: Number(fundingGoal),
           status: 'Active'
-        }) 
+        })
       });
       const data = await res.json();
-      
+
       if (!res.ok) throw new Error(data.error || 'System fault on campaign deployment');
-      
+
       const newCampaign = data.campaign || data;
       addLog(`Success! Campaign goes live. ID: ${newCampaign._id || 'Test Mode'}`);
-      
+
       // Prepend the new campaign to the list dynamically
       setMyCampaigns(prev => [newCampaign, ...prev]);
 
@@ -189,7 +190,7 @@ function DashboardContent() {
       setHook('');
       setBlueprint('');
       setFundingGoal('');
-      
+
     } catch (err: any) {
       addLog(`Error: ${err.message}`);
     } finally {
@@ -208,7 +209,7 @@ function DashboardContent() {
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-12">
       <div className="max-w-7xl mx-auto space-y-8">
-        
+
         {/* Header Section */}
         <div className="flex justify-between items-center bg-white p-6 rounded-xl shadow-sm border border-gray-100">
           <div className="flex items-center gap-4">
@@ -223,16 +224,16 @@ function DashboardContent() {
             </div>
           </div>
           <div className="text-right">
-             <p className="text-gray-900 font-medium text-sm">{user?.primaryEmailAddress?.emailAddress}</p>
-             <p className="text-xs text-blue-600 font-semibold uppercase mt-1">{(user?.publicMetadata?.role as string) || 'Creator'}</p>
+            <p className="text-gray-900 font-medium text-sm">{user?.primaryEmailAddress?.emailAddress}</p>
+            <p className="text-xs text-blue-600 font-semibold uppercase mt-1">{(user?.publicMetadata?.role as string) || 'Creator'}</p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          
+
           {/* Column 1: Workspace & Analytics */}
           <div className="lg:col-span-2 space-y-6">
-            
+
             {/* Live Projects Matrix */}
             <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100">
               <div className="flex items-center justify-between mb-6">
@@ -244,7 +245,7 @@ function DashboardContent() {
                   {myCampaigns.length} Deployed
                 </div>
               </div>
-              
+
               {loadingCampaigns ? (
                 <div className="flex items-center justify-center p-8">
                   <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
@@ -267,27 +268,26 @@ function DashboardContent() {
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {myCampaigns.map(camp => {
-                         const percent = Math.min(100, Math.round((camp.currentFunding / camp.fundingGoal) * 100));
-                         return (
-                           <tr key={camp._id} className="hover:bg-gray-50 transition-colors">
-                             <td className="py-4 pl-2">
-                               <p className="font-semibold text-gray-900 text-sm max-w-[200px] truncate">{camp.hook}</p>
-                               <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2">
-                                 <div className={`h-1.5 rounded-full ${percent >= 100 ? 'bg-green-500' : 'bg-blue-600'}`} style={{ width: `${percent}%` }}></div>
-                               </div>
-                             </td>
-                             <td className="py-4 text-sm text-gray-600 font-medium">${camp.fundingGoal.toLocaleString()}</td>
-                             <td className="py-4 text-sm font-bold text-gray-900">${(camp.currentFunding || 0).toLocaleString()}</td>
-                             <td className="py-4 pr-2 text-right">
-                               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                                 camp.status === 'Funded' ? 'bg-green-100 text-green-800' : 
-                                 camp.status === 'Active' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
-                               }`}>
-                                 {camp.status}
-                               </span>
-                             </td>
-                           </tr>
-                         );
+                        const percent = Math.min(100, Math.round((camp.currentFunding / camp.fundingGoal) * 100));
+                        return (
+                          <tr key={camp._id} className="hover:bg-gray-50 transition-colors">
+                            <td className="py-4 pl-2">
+                              <p className="font-semibold text-gray-900 text-sm max-w-[200px] truncate">{camp.hook}</p>
+                              <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2">
+                                <div className={`h-1.5 rounded-full ${percent >= 100 ? 'bg-green-500' : 'bg-blue-600'}`} style={{ width: `${percent}%` }}></div>
+                              </div>
+                            </td>
+                            <td className="py-4 text-sm text-gray-600 font-medium">₹{camp.fundingGoal.toLocaleString()}</td>
+                            <td className="py-4 text-sm font-bold text-gray-900">₹{(camp.currentFunding || 0).toLocaleString()}</td>
+                            <td className="py-4 pr-2 text-right">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${camp.status === 'Funded' ? 'bg-green-100 text-green-800' :
+                                  camp.status === 'Active' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
+                                }`}>
+                                {camp.status}
+                              </span>
+                            </td>
+                          </tr>
+                        );
                       })}
                     </tbody>
                   </table>
@@ -301,7 +301,7 @@ function DashboardContent() {
                 <Target className="w-6 h-6 text-blue-600" />
                 <h2 className="text-xl font-bold text-gray-900">Launch New Project</h2>
               </div>
-              
+
               <form onSubmit={deployCampaign} className="space-y-5">
 
                 {/* ── Creator Identity ── */}
@@ -336,7 +336,7 @@ function DashboardContent() {
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Project Name (Hook)</label>
-                  <input 
+                  <input
                     required
                     type="text"
                     value={hook}
@@ -348,7 +348,7 @@ function DashboardContent() {
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Project Blueprint</label>
-                  <textarea 
+                  <textarea
                     required
                     rows={4}
                     value={blueprint}
@@ -359,8 +359,8 @@ function DashboardContent() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Funding Goal ($)</label>
-                  <input 
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Funding Goal (₹)</label>
+                  <input
                     required
                     type="number"
                     min="1"
@@ -373,7 +373,7 @@ function DashboardContent() {
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Category</label>
-                  <select 
+                  <select
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
                     className=" text-black w-full px-4 py-3 rounded-lg border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
@@ -386,7 +386,7 @@ function DashboardContent() {
                 </div>
 
                 <div className="pt-2">
-                  <button 
+                  <button
                     type="submit"
                     disabled={isSubmitting}
                     className="w-full sm:w-auto px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-lg hover:shadow-blue-500/30 transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
@@ -400,7 +400,7 @@ function DashboardContent() {
                 </div>
               </form>
             </div>
-            
+
             {/* AI Generator */}
             <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-8 rounded-xl shadow-sm border border-blue-100">
               <h2 className="text-blue-900 font-semibold mb-4 flex items-center gap-2">
@@ -427,7 +427,7 @@ function DashboardContent() {
                     onClick={() => setBlueprint(aiOutput)}
                     className="text-xs font-semibold text-blue-600 hover:text-blue-800 underline disabled:opacity-50 flex items-center gap-1"
                   >
-                     <ArrowUpRight className="w-3 h-3" /> Use as Blueprint
+                    <ArrowUpRight className="w-3 h-3" /> Use as Blueprint
                   </button>
                 </div>
               )}
@@ -436,25 +436,25 @@ function DashboardContent() {
 
           {/* Column 2: Payment Module & Logs */}
           <div className="space-y-6">
-            
+
             {/* Financial Module */}
             <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
               <div className="flex items-center gap-2 mb-4">
                 <Wallet className="w-5 h-5 text-green-500" />
                 <h2 className="text-gray-900 font-bold">Financial Dashboard</h2>
               </div>
-              
+
               <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-xl p-5 mb-6 text-center text-white shadow-lg relative overflow-hidden">
                 <div className="absolute top-0 right-0 -mr-6 -mt-6 opacity-10">
-                   <Banknote className="w-32 h-32" />
+                  <Banknote className="w-32 h-32" />
                 </div>
                 <div className="relative z-10">
                   <div className="text-xs text-gray-400 font-semibold uppercase tracking-wider mb-2">Available Balance</div>
-                  <div className="text-4xl font-extrabold mb-1">${availableBalance.toLocaleString()}</div>
-                  <div className="text-xs text-green-400 font-medium">Total Raised: ${totalRaised.toLocaleString()}</div>
+                  <div className="text-4xl font-extrabold mb-1">₹{availableBalance.toLocaleString()}</div>
+                  <div className="text-xs text-green-400 font-medium">Total Raised: ₹{totalRaised.toLocaleString()}</div>
                 </div>
               </div>
-              
+
               <div className="space-y-3">
                 <button
                   onClick={() => alert("Withdrawal module not yet integrated. Please hook up your banking details later.")}
@@ -469,7 +469,7 @@ function DashboardContent() {
                   <CreditCard className="w-5 h-5" /> Payout Settings
                 </button>
               </div>
-              
+
               <div className="mt-5 flex items-start gap-2 text-xs text-gray-500 p-3 bg-blue-50/50 rounded-lg border border-blue-50">
                 <Info className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
                 <p>Withdrawals are subject to 5% platform protocol fees. Integration hooks with banking apis will be ready once enterprise rollout is complete.</p>
@@ -479,8 +479,8 @@ function DashboardContent() {
             {/* System Logs */}
             <div className="bg-gray-900 p-6 rounded-xl shadow-sm overflow-hidden flex flex-col h-[400px]">
               <div className="flex items-center gap-2 mb-4">
-                 <div className="text-gray-300 font-semibold text-sm">System Console</div>
-                 <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                <div className="text-gray-300 font-semibold text-sm">System Console</div>
+                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
               </div>
               <div className="overflow-y-auto flex-grow space-y-3 pr-2">
                 {logs.length === 0 ? (

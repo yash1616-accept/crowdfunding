@@ -1,10 +1,14 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import html2canvas from 'html2canvas';
+import { apiUrl } from '../lib/api';
 import { useAuth, useUser } from '@clerk/clerk-react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Loader2, Sparkles, TrendingUp, CheckCircle, X, ChevronRight,
   Users, BarChart3, Shield, Globe, Mail, FileText, Zap,
   Star, CreditCard, Lock, ArrowRight, Share2, BookOpen,
-  AlertCircle, Wallet, BadgeCheck, Building2, Lightbulb, Heart, Layers
+  AlertCircle, Wallet, BadgeCheck, Building2, Lightbulb, Heart, Layers,
+  Search, SlidersHorizontal
 } from 'lucide-react';
 
 /* ─────────────────────────── Types ─────────────────────────── */
@@ -40,9 +44,10 @@ const fallCat = CAT.Other;
 const getCat = (c: string) => CAT[c] ?? fallCat;
 
 const TIERS = [
-  { label: 'Seed',   sub: 'Early backer',      amount: 500,   equity: 0.01, icon: '🌱', perks: ['Early product access', 'Shareholder certificate', 'Monthly newsletter'] },
-  { label: 'Growth', sub: 'Growth investor',    amount: 2500,  equity: 0.05, icon: '📈', perks: ['All Seed perks', 'Quarterly board update', 'Priority support line'] },
-  { label: 'Lead',   sub: 'Strategic partner',  amount: 10000, equity: 0.15, icon: '🏆', perks: ['All Growth perks', 'Advisory board seat', 'Co-branding rights', 'Direct founder access'] },
+  { label: 'Seed',   sub: 'Early backer',      amount: 5000,   equity: 0.01, icon: '🌱', perks: ['Early product access', 'Shareholder certificate', 'Monthly newsletter'] },
+  { label: 'Growth', sub: 'Growth investor',    amount: 25000,  equity: 0.05, icon: '📈', perks: ['All Seed perks', 'Quarterly board update', 'Priority support line'] },
+  { label: 'Lead',   sub: 'Strategic partner',  amount: 100000, equity: 0.15, icon: '🏆', perks: ['All Growth perks', 'Advisory board seat', 'Co-branding rights', 'Direct founder access'] },
+  { label: 'Custom', sub: 'Pay as you wish',    amount: 0,      equity: 0,    icon: '💫', perks: ['Official Backer Certificate', 'Project Updates'] },
 ];
 
 /* ─────────────────────────── Reusable Section ──────────────── */
@@ -67,13 +72,30 @@ export default function Explore() {
   const [error, setError]         = useState('');
   const [fundingId, setFundingId] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState('All');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortOption, setSortOption] = useState('Newest');
   const [selected, setSelected]   = useState<Campaign | null>(null);
   const [selectedTier, setSelectedTier] = useState<number | null>(null);
+  const [customAmount, setCustomAmount] = useState<string>('');
+  const certRef = useRef<HTMLDivElement>(null);
   const [step, setStep] = useState<'tiers' | 'form' | 'confirm' | 'done'>('tiers');
   const { getToken } = useAuth();
   const { user } = useUser();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
 
-  useEffect(() => { fetchCampaigns(); }, []);
+  const downloadCertificate = async () => {
+    if (!certRef.current) return;
+    const canvas = await html2canvas(certRef.current, { backgroundColor: '#080b12' });
+    const link = document.createElement('a');
+    link.download = `Certificate_${selected?.hook || 'Investment'}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  };
+
+  useEffect(() => { 
+    fetchCampaigns(); 
+  }, []);
   useEffect(() => {
     document.body.style.overflow = selected ? 'hidden' : '';
     return () => { document.body.style.overflow = ''; };
@@ -87,7 +109,7 @@ export default function Explore() {
   const fetchCampaigns = async () => {
     try {
       const token = await getToken();
-      const res = await fetch('/api/campaigns', { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(apiUrl('/api/campaigns'), { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) throw new Error('Failed to load campaigns');
       const data = await res.json();
       setCampaigns(data.campaigns || []);
@@ -98,29 +120,113 @@ export default function Explore() {
   const openPanel = (c: Campaign) => { setSelected(c); setSelectedTier(null); setStep('tiers'); };
   const closePanel = useCallback(() => { setSelected(null); setSelectedTier(null); setStep('tiers'); }, []);
 
-  const handleFund = async (id: string, amount: number) => {
-    setFundingId(id);
-    try {
-      const token = await getToken();
-      const res = await fetch(`/api/campaigns/${id}/fund`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ amount, backerUsername: user?.username || user?.firstName || 'Anonymous' }),
-      });
-      if (!res.ok) throw new Error();
-      setCampaigns(prev => prev.map(c => {
-        if (c._id !== id) return c;
-        const updated = { ...c, currentFunding: c.currentFunding + amount };
-        if (updated.currentFunding >= updated.fundingGoal) updated.status = 'Funded';
-        if (selected?._id === id) setSelected(updated);
-        return updated;
-      }));
-      setStep('done');
-    } catch { alert('Funding failed. Please try again.'); }
-    finally { setFundingId(null); }
+  const loadRazorpayScript = () => {
+    return new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
   };
 
-  const filtered = campaigns.filter(c => activeCategory === 'All' || c.category === activeCategory);
+  const initiateRazorpay = async (id: string, amount: number) => {
+    setFundingId(id);
+    const backerUsername = user?.username || user?.firstName || 'Anonymous';
+    try {
+      const token = await getToken();
+      const res = await fetch(apiUrl(`/api/campaigns/${id}/razorpay-order`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amount, backerUsername }),
+      });
+      if (!res.ok) throw new Error();
+      const order = await res.json();
+
+      if (order.isMock) {
+        // Handle mock mode locally
+        await fetch(apiUrl(`/api/campaigns/${id}/razorpay-verify`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ isMock: true, amount, backerUsername }),
+        });
+        fetchCampaigns();
+        setStep('done');
+        setFundingId(null);
+        return;
+      }
+
+      const resScript = await loadRazorpayScript();
+      if (!resScript) {
+        alert('Razorpay SDK failed to load. Are you online?');
+        setFundingId(null);
+        return;
+      }
+
+      const options = {
+        key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+        amount: order.amount,
+        currency: order.currency,
+        name: 'Crowdfunding Platform',
+        description: `Investment in ${selected?.hook || 'Venture'}`,
+        order_id: order.id,
+        handler: async function (response: any) {
+          try {
+            const freshToken = await getToken();
+            const res = await fetch(apiUrl(`/api/campaigns/${id}/razorpay-verify`), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${freshToken}` },
+              body: JSON.stringify({ ...response, amount, backerUsername }),
+            });
+            
+            if (!res.ok) throw new Error('Verification failed on server');
+            
+            await fetchCampaigns();
+            
+            // Update the locally selected campaign so the side panel shows the new amount
+            setSelected(prev => prev ? { 
+              ...prev, 
+              currentFunding: prev.currentFunding + amount,
+              backers: [...(prev.backers || []), { username: backerUsername, amount, date: new Date().toISOString() }]
+            } : null);
+            
+            setStep('done');
+          } catch (e) {
+            console.error(e);
+            alert('Payment verification failed. Please contact support if you were charged.');
+          }
+        },
+        prefill: {
+          name: backerUsername,
+          email: user?.primaryEmailAddress?.emailAddress || '',
+        },
+        theme: {
+          color: '#4f46e5', // Indigo 600
+        },
+      };
+
+      const paymentObject = new (window as any).Razorpay(options);
+      paymentObject.on('payment.failed', function (response: any) {
+        alert(response.error.description);
+      });
+      paymentObject.open();
+
+    } catch (e) { 
+      alert('Checkout initialization failed. Please try again.'); 
+    } finally {
+      setFundingId(null);
+    }
+  };
+
+  const filtered = campaigns
+    .filter(c => activeCategory === 'All' || c.category === activeCategory)
+    .filter(c => c.hook.toLowerCase().includes(searchQuery.toLowerCase()) || c.blueprint.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => {
+      if (sortOption === 'Most Funded') return b.currentFunding - a.currentFunding;
+      if (sortOption === 'Goal Amount') return b.fundingGoal - a.fundingGoal;
+      // Default: Newest
+      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+    });
   const totalRaised = campaigns.reduce((s, c) => s + c.currentFunding, 0);
 
   /* ── Loading ── */
@@ -165,7 +271,7 @@ export default function Explore() {
             <div className="flex items-center gap-1 shrink-0">
               {[
                 { label: 'Active Deals',  value: campaigns.length.toString(), color: 'text-white' },
-                { label: 'Total Raised',  value: `$${(totalRaised / 1000).toFixed(1)}k`, color: 'text-emerald-400' },
+                { label: 'Total Raised',  value: `₹${(totalRaised / 1000).toFixed(1)}k`, color: 'text-emerald-400' },
                 { label: 'Fully Funded',  value: campaigns.filter(c => c.status === 'Funded').length.toString(), color: 'text-indigo-400' },
               ].map((s, i) => (
                 <React.Fragment key={i}>
@@ -183,27 +289,52 @@ export default function Explore() {
 
       {/* ══ STICKY FILTER BAR ══ */}
       <div className="sticky top-0 z-30 bg-[#080b12]/90 backdrop-blur-xl border-b border-white/5">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center gap-2.5 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-          {['All', 'Tech', 'Creative', 'Community', 'Other'].map(cat => {
-            const ct   = getCat(cat);
-            const Icon = cat !== 'All' ? ct.icon : Sparkles;
-            const isActive = activeCategory === cat;
-            const count = cat === 'All' ? campaigns.length : campaigns.filter(c => c.category === cat).length;
-            return (
-              <button key={cat} onClick={() => setActiveCategory(cat)}
-                className={`shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-250 ${
-                  isActive
-                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30 scale-[1.03]'
-                    : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/8 hover:border-white/15'
-                }`}>
-                <Icon className="w-3.5 h-3.5" />
-                {cat}
-                <span className={`text-xs font-bold px-1.5 py-0.5 rounded-md ${isActive ? 'bg-white/20 text-white' : 'bg-white/5 text-gray-600'}`}>{count}</span>
-              </button>
-            );
-          })}
-          <div className="ml-auto shrink-0 text-xs text-gray-600 font-medium hidden md:block">
-            {filtered.length} venture{filtered.length !== 1 ? 's' : ''} shown
+        <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row md:items-center gap-4">
+          <div className="flex items-center gap-2.5 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+            {['All', 'Tech', 'Creative', 'Community', 'Other'].map(cat => {
+              const ct   = getCat(cat);
+              const Icon = cat !== 'All' ? ct.icon : Sparkles;
+              const isActive = activeCategory === cat;
+              const count = cat === 'All' ? campaigns.length : campaigns.filter(c => c.category === cat).length;
+              return (
+                <button key={cat} onClick={() => setActiveCategory(cat)}
+                  className={`shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-250 ${
+                    isActive
+                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30 scale-[1.03]'
+                      : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/8 hover:border-white/15'
+                  }`}>
+                  <Icon className="w-3.5 h-3.5" />
+                  {cat}
+                  <span className={`text-xs font-bold px-1.5 py-0.5 rounded-md ${isActive ? 'bg-white/20 text-white' : 'bg-white/5 text-gray-600'}`}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
+          
+          <div className="flex items-center gap-3 ml-auto shrink-0 w-full md:w-auto">
+            <div className="relative flex-grow md:w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+              <input 
+                type="text" 
+                placeholder="Search ventures..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 focus:border-indigo-500/50 rounded-xl pl-9 pr-4 py-2 text-sm text-white placeholder-gray-500 outline-none transition-all"
+              />
+            </div>
+            <div className="relative">
+              <select 
+                value={sortOption}
+                onChange={(e) => setSortOption(e.target.value)}
+                className="appearance-none bg-white/5 border border-white/10 hover:border-white/20 rounded-xl pl-9 pr-8 py-2 text-sm text-white outline-none cursor-pointer transition-all"
+              >
+                <option value="Newest" className="bg-[#0e1220]">Newest</option>
+                <option value="Most Funded" className="bg-[#0e1220]">Most Funded</option>
+                <option value="Goal Amount" className="bg-[#0e1220]">Goal Amount</option>
+              </select>
+              <SlidersHorizontal className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+              <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 rotate-90 pointer-events-none" />
+            </div>
           </div>
         </div>
       </div>
@@ -282,15 +413,15 @@ export default function Explore() {
                     {/* Progress bar */}
                     <div className="mb-4">
                       <div className="flex justify-between text-xs mb-1.5">
-                        <span className="font-bold text-white">${campaign.currentFunding.toLocaleString()}</span>
-                        <span className="text-gray-600">of ${campaign.fundingGoal.toLocaleString()}</span>
+                        <span className="font-bold text-white">₹{campaign.currentFunding.toLocaleString()}</span>
+                        <span className="text-gray-600">of ₹{campaign.fundingGoal.toLocaleString()}</span>
                       </div>
                       <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
                         <div className={`h-full rounded-full bg-gradient-to-r ${ct.bar} transition-all duration-700`} style={{ width: `${pct}%` }} />
                       </div>
                       <div className="flex justify-between mt-1.5 text-xs">
                         <span className="text-gray-600">{pct}% funded</span>
-                        {!isFunded && <span className="text-gray-600">${(campaign.fundingGoal - campaign.currentFunding).toLocaleString()} to go</span>}
+                        {!isFunded && <span className="text-gray-600">₹{(campaign.fundingGoal - campaign.currentFunding).toLocaleString()} to go</span>}
                       </div>
                     </div>
 
@@ -375,8 +506,8 @@ export default function Explore() {
                       <>
                         <div className="flex items-end justify-between mb-4">
                           <div>
-                            <div className="text-3xl font-black text-white leading-none">${selected.currentFunding.toLocaleString()}</div>
-                            <div className="text-sm text-gray-500 mt-1">raised of <span className="text-gray-300 font-semibold">${selected.fundingGoal.toLocaleString()}</span></div>
+                            <div className="text-3xl font-black text-white leading-none">₹{selected.currentFunding.toLocaleString()}</div>
+                            <div className="text-sm text-gray-500 mt-1">raised of <span className="text-gray-300 font-semibold">₹{selected.fundingGoal.toLocaleString()}</span></div>
                           </div>
                           <div className="text-right">
                             <div className={`text-4xl font-black ${pct >= 75 ? 'text-emerald-400' : 'text-indigo-400'}`}>{pct}%</div>
@@ -390,7 +521,7 @@ export default function Explore() {
                           {[
                             { label: 'Backers',   value: (selected.backers?.length ?? 0).toString() },
                             { label: 'Days Left', value: '30' },
-                            { label: 'Remaining', value: `$${Math.max(0, selected.fundingGoal - selected.currentFunding).toLocaleString()}` },
+                            { label: 'Remaining', value: `₹${Math.max(0, selected.fundingGoal - selected.currentFunding).toLocaleString()}` },
                           ].map(m => (
                             <div key={m.label} className="bg-white/4 rounded-xl p-3 text-center">
                               <div className="text-base font-black text-white">{m.value}</div>
@@ -444,7 +575,7 @@ export default function Explore() {
                             {b.username.charAt(0).toUpperCase()}
                           </div>
                           <span className="text-sm text-gray-300 font-medium flex-grow">@{b.username}</span>
-                          <span className="text-sm font-bold text-emerald-400">+${b.amount.toLocaleString()}</span>
+                          <span className="text-sm font-bold text-emerald-400">+₹{b.amount.toLocaleString()}</span>
                         </div>
                       ))}
                     </div>
@@ -475,40 +606,68 @@ export default function Explore() {
                     {/* Step 1 – Pick tier */}
                     {step === 'tiers' && (
                       <div className="space-y-3">
-                        {TIERS.map((tier, idx) => (
-                          <div key={idx} onClick={() => setSelectedTier(idx)}
-                            className={`flex items-start gap-4 border rounded-2xl p-4 cursor-pointer transition-all duration-250 ${
-                              selectedTier === idx
-                                ? 'border-indigo-500 bg-indigo-500/10 shadow-xl shadow-indigo-500/10'
-                                : 'border-white/8 bg-white/3 hover:border-white/18 hover:bg-white/5'
-                            }`}>
-                            <span className="text-2xl mt-0.5 shrink-0">{tier.icon}</span>
-                            <div className="flex-grow min-w-0">
-                              <div className="flex items-baseline justify-between mb-1">
-                                <div>
-                                  <span className="font-black text-white text-sm">{tier.label}</span>
-                                  <span className="text-xs text-gray-500 ml-2">{tier.sub}</span>
+                        {TIERS.map((tier, idx) => {
+                          const isCustom = tier.label === 'Custom';
+                          const isSelected = selectedTier === idx;
+                          return (
+                            <div key={idx} className={`border rounded-2xl p-4 transition-all duration-250 ${isSelected ? 'border-indigo-500 bg-indigo-500/10 shadow-xl shadow-indigo-500/10' : 'border-white/8 bg-white/3 hover:border-white/18 hover:bg-white/5'}`}>
+                              <div className="flex items-start gap-4 cursor-pointer" onClick={() => setSelectedTier(idx)}>
+                                <span className="text-2xl mt-0.5 shrink-0">{tier.icon}</span>
+                                <div className="flex-grow min-w-0">
+                                  <div className="flex items-baseline justify-between mb-1">
+                                    <div>
+                                      <span className="font-black text-white text-sm">{tier.label}</span>
+                                      <span className="text-xs text-gray-500 ml-2">{tier.sub}</span>
+                                    </div>
+                                    <div className="text-right">
+                                      <span className="text-lg font-black text-indigo-300">{isCustom ? '₹ Custom' : `₹${tier.amount.toLocaleString()}`}</span>
+                                      {!isCustom && <span className="text-xs text-gray-600 ml-1">{tier.equity}% equity</span>}
+                                    </div>
+                                  </div>
+                                  {!isCustom && (
+                                    <p className="text-xs text-gray-600 mb-2">
+                                      ~{((tier.amount / selected.fundingGoal) * 100).toFixed(4)}% project share
+                                    </p>
+                                  )}
+                                  <ul className="space-y-1">
+                                    {tier.perks.map(p => (
+                                      <li key={p} className="flex items-center gap-1.5 text-xs text-gray-500">
+                                        <CheckCircle className="w-3 h-3 text-indigo-400 shrink-0" /> {p}
+                                      </li>
+                                    ))}
+                                  </ul>
                                 </div>
-                                <div className="text-right">
-                                  <span className="text-lg font-black text-indigo-300">${tier.amount.toLocaleString()}</span>
-                                  <span className="text-xs text-gray-600 ml-1">{tier.equity}% equity</span>
-                                </div>
+                                <div className={`w-4 h-4 rounded-full border-2 shrink-0 mt-1 transition-all ${isSelected ? 'border-indigo-500 bg-indigo-500' : 'border-white/20'}`} />
                               </div>
-                              <p className="text-xs text-gray-600 mb-2">
-                                ~{((tier.amount / selected.fundingGoal) * 100).toFixed(4)}% project share
-                              </p>
-                              <ul className="space-y-1">
-                                {tier.perks.map(p => (
-                                  <li key={p} className="flex items-center gap-1.5 text-xs text-gray-500">
-                                    <CheckCircle className="w-3 h-3 text-indigo-400 shrink-0" /> {p}
-                                  </li>
-                                ))}
-                              </ul>
+                              
+                              {/* Custom Input */}
+                              {isCustom && isSelected && (
+                                <div className="mt-4 pt-4 border-t border-white/10">
+                                  <label className="block text-xs font-semibold text-gray-400 mb-2">Enter Amount (₹)</label>
+                                  <div className="relative">
+                                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">₹</span>
+                                    <input 
+                                      type="number" 
+                                      value={customAmount} 
+                                      onChange={(e) => setCustomAmount(e.target.value)}
+                                      placeholder="100+"
+                                      className="w-full bg-black/40 border border-white/10 rounded-xl py-3 pl-8 pr-4 text-white font-bold outline-none focus:border-indigo-500 transition-colors"
+                                    />
+                                  </div>
+                                  {Number(customAmount) > 0 && Number(customAmount) < 100 && (
+                                    <p className="text-red-400 text-xs mt-2 flex items-center gap-1"><AlertCircle className="w-3 h-3"/> Minimum investment is ₹100</p>
+                                  )}
+                                  {Number(customAmount) > (selected.fundingGoal - selected.currentFunding) && (
+                                    <p className="text-red-400 text-xs mt-2 flex items-center gap-1"><AlertCircle className="w-3 h-3"/> Cannot exceed remaining goal (₹{(selected.fundingGoal - selected.currentFunding).toLocaleString()})</p>
+                                  )}
+                                </div>
+                              )}
                             </div>
-                            <div className={`w-4 h-4 rounded-full border-2 shrink-0 mt-1 transition-all ${selectedTier === idx ? 'border-indigo-500 bg-indigo-500' : 'border-white/20'}`} />
-                          </div>
-                        ))}
-                        <button disabled={selectedTier === null} onClick={() => setStep('form')}
+                          );
+                        })}
+                        <button 
+                          disabled={selectedTier === null || (TIERS[selectedTier].label === 'Custom' && (Number(customAmount) < 100 || Number(customAmount) > (selected.fundingGoal - selected.currentFunding)))} 
+                          onClick={() => setStep('form')}
                           className="w-full py-3 rounded-2xl font-bold text-sm bg-gradient-to-r from-indigo-600 to-violet-600 text-white hover:opacity-90 transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20">
                           Proceed to Payment <ArrowRight className="w-4 h-4" />
                         </button>
@@ -522,10 +681,12 @@ export default function Explore() {
                           <span className="text-3xl">{TIERS[selectedTier].icon}</span>
                           <div className="flex-grow">
                             <p className="text-xs font-bold text-indigo-300 uppercase tracking-wider">{TIERS[selectedTier].label} Tier</p>
-                            <p className="text-2xl font-black text-white">${TIERS[selectedTier].amount.toLocaleString()}</p>
+                            <p className="text-2xl font-black text-white">₹{TIERS[selectedTier].label === 'Custom' ? Number(customAmount).toLocaleString() : TIERS[selectedTier].amount.toLocaleString()}</p>
                           </div>
                           <div className="text-right text-xs text-gray-500">
-                            <div className="text-indigo-400 font-bold text-sm">{TIERS[selectedTier].equity}%</div>
+                            <div className="text-indigo-400 font-bold text-sm">
+                              {TIERS[selectedTier].label === 'Custom' ? ((Number(customAmount) / selected.fundingGoal) * 100).toFixed(4) : TIERS[selectedTier].equity}%
+                            </div>
                             <div>equity</div>
                           </div>
                         </div>
@@ -561,28 +722,34 @@ export default function Explore() {
                       <div className="bg-gradient-to-br from-white/4 to-white/2 border border-white/10 rounded-2xl p-5 space-y-4">
                         <h4 className="font-black text-white text-sm">Confirm Your Investment</h4>
                         <div className="space-y-2.5 text-sm">
-                          {([
-                            ['Tier',            TIERS[selectedTier].label,                                            'text-white'],
-                            ['Amount',          `$${TIERS[selectedTier].amount.toLocaleString()}`,                    'text-white'],
-                            ['Equity',          `${TIERS[selectedTier].equity}%`,                                    'text-indigo-400'],
-                            ['Project Share',   `~${((TIERS[selectedTier].amount / selected.fundingGoal) * 100).toFixed(4)}%`, 'text-gray-300'],
-                            ['Platform Fee 5%', `$${(TIERS[selectedTier].amount * 0.05).toLocaleString()}`,           'text-gray-400'],
-                          ] as [string, string, string][]).map(([label, val, cls]) => (
-                            <div key={label} className="flex justify-between items-center">
-                              <span className="text-gray-500">{label}</span>
-                              <span className={`font-bold ${cls}`}>{val}</span>
-                            </div>
-                          ))}
+                          {(() => {
+                             const amt = TIERS[selectedTier].label === 'Custom' ? Number(customAmount) : TIERS[selectedTier].amount;
+                             const eq = TIERS[selectedTier].label === 'Custom' ? ((amt / selected.fundingGoal) * 100).toFixed(4) : TIERS[selectedTier].equity;
+                             return ([
+                              ['Tier',            TIERS[selectedTier].label,                                            'text-white'],
+                              ['Amount',          `₹${amt.toLocaleString()}`,                    'text-white'],
+                              ['Equity',          `${eq}%`,                                    'text-indigo-400'],
+                              ['Project Share',   `~${((amt / selected.fundingGoal) * 100).toFixed(4)}%`, 'text-gray-300'],
+                              ['Platform Fee 5%', `₹${(amt * 0.05).toLocaleString()}`,           'text-gray-400'],
+                            ] as [string, string, string][]).map(([label, val, cls]) => (
+                              <div key={label} className="flex justify-between items-center">
+                                <span className="text-gray-500">{label}</span>
+                                <span className={`font-bold ${cls}`}>{val}</span>
+                              </div>
+                            ));
+                          })()}
                           <div className="border-t border-white/8 pt-3 flex justify-between items-center">
                             <span className="font-black text-white">Total Charged</span>
-                            <span className="font-black text-white text-lg">${(TIERS[selectedTier].amount * 1.05).toLocaleString()}</span>
+                            <span className="font-black text-white text-lg">
+                              ₹{((TIERS[selectedTier].label === 'Custom' ? Number(customAmount) : TIERS[selectedTier].amount) * 1.05).toLocaleString()}
+                            </span>
                           </div>
                         </div>
                         <div className="flex gap-3 pt-1">
                           <button onClick={() => setStep('form')} className="flex-1 py-3 rounded-2xl text-sm font-semibold bg-white/6 hover:bg-white/10 text-gray-400 transition-all border border-white/8">Back</button>
-                          <button disabled={!!fundingId} onClick={() => handleFund(selected._id, TIERS[selectedTier!].amount)}
+                          <button disabled={!!fundingId} onClick={() => initiateRazorpay(selected._id, TIERS[selectedTier].label === 'Custom' ? Number(customAmount) : TIERS[selectedTier].amount)}
                             className="flex-1 py-3 rounded-2xl text-sm font-bold bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:opacity-90 transition-all flex items-center justify-center gap-2 shadow-lg disabled:opacity-50">
-                            {fundingId ? <Loader2 className="w-4 h-4 animate-spin" /> : <><TrendingUp className="w-4 h-4" />Confirm Investment</>}
+                            {fundingId ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CreditCard className="w-4 h-4" />Checkout with Razorpay</>}
                           </button>
                         </div>
                       </div>
@@ -590,19 +757,64 @@ export default function Explore() {
 
                     {/* Step 4 – Done */}
                     {step === 'done' && (
-                      <div className="bg-gradient-to-br from-emerald-500/10 to-teal-500/5 border border-emerald-500/20 rounded-2xl p-8 text-center space-y-4">
-                        <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center mx-auto">
-                          <CheckCircle className="w-9 h-9 text-emerald-400" />
+                      <div className="space-y-4">
+                        <div 
+                          ref={certRef}
+                          className="relative bg-gradient-to-br from-[#0a0f1c] to-[#0d1424] border-2 border-[#1e293b] rounded-xl p-8 overflow-hidden"
+                          style={{ width: '100%', minHeight: '400px' }}
+                        >
+                          {/* Certificate background elements */}
+                          <div className="absolute top-0 left-0 w-full h-full border-[6px] border-double border-indigo-500/20 rounded-xl pointer-events-none" />
+                          <div className="absolute -top-20 -right-20 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl" />
+                          <div className="absolute -bottom-20 -left-20 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl" />
+                          
+                          <div className="relative z-10 flex flex-col h-full justify-between text-center space-y-6">
+                            <div>
+                              <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-[0_0_30px_rgba(99,102,241,0.3)]">
+                                <Shield className="w-8 h-8 text-white" />
+                              </div>
+                              <h2 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 to-violet-300 tracking-widest uppercase" style={{ fontFamily: 'serif' }}>Certificate of Investment</h2>
+                              <p className="text-indigo-500/60 text-xs tracking-[0.2em] mt-1 font-bold">OFFICIAL BACKER DOCUMENT</p>
+                            </div>
+                            
+                            <div className="space-y-4">
+                              <p className="text-gray-400 italic text-sm">This formally certifies that</p>
+                              <h3 className="text-3xl font-black text-white">{user?.username || user?.firstName || 'Esteemed Investor'}</h3>
+                              <p className="text-gray-400 italic text-sm">has successfully invested the sum of</p>
+                              <div className="text-3xl font-black text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.3)]">
+                                ₹{TIERS[selectedTier!].label === 'Custom' ? Number(customAmount).toLocaleString() : TIERS[selectedTier!].amount.toLocaleString()}
+                              </div>
+                              <p className="text-gray-400 italic text-sm">into the venture known as</p>
+                              <h4 className="text-xl font-bold text-indigo-100">{selected.hook}</h4>
+                            </div>
+                            
+                            <div className="flex justify-between items-end border-t border-indigo-500/20 pt-6 mt-6">
+                              <div className="text-left">
+                                <p className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-1">Equity Stake</p>
+                                <p className="text-lg font-black text-indigo-300">{TIERS[selectedTier!].label === 'Custom' ? ((Number(customAmount) / selected.fundingGoal) * 100).toFixed(4) : TIERS[selectedTier!].equity}%</p>
+                              </div>
+                              <div className="text-center">
+                                <div className="w-12 h-12 rounded-full border border-emerald-500/30 flex items-center justify-center mb-2 mx-auto">
+                                  <BadgeCheck className="w-6 h-6 text-emerald-400" />
+                                </div>
+                                <p className="text-[9px] text-gray-500 uppercase tracking-widest">Verified on Ledger</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-1">Date</p>
+                                <p className="text-sm font-bold text-gray-300">{new Date().toLocaleDateString()}</p>
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <h4 className="text-xl font-black text-white mb-2">Investment Confirmed!</h4>
-                          <p className="text-gray-500 text-sm leading-relaxed">
-                            Your contribution has been permanently recorded on the project ledger. You are now an official backer of <span className="text-white font-semibold">{selected.hook}</span>.
-                          </p>
+                        
+                        <div className="flex gap-3 mt-4">
+                          <button onClick={closePanel} className="flex-1 py-3 rounded-2xl text-sm font-semibold bg-white/6 hover:bg-white/10 text-gray-300 transition-all border border-white/8">
+                            Close Panel
+                          </button>
+                          <button onClick={downloadCertificate} className="flex-1 py-3 rounded-2xl text-sm font-bold bg-gradient-to-r from-indigo-600 to-violet-600 text-white hover:opacity-90 transition-all flex items-center justify-center gap-2 shadow-lg">
+                            <CheckCircle className="w-4 h-4" /> Download Certificate
+                          </button>
                         </div>
-                        <button onClick={closePanel} className="mt-2 px-8 py-3 bg-white/8 hover:bg-white/15 text-white rounded-2xl text-sm font-bold transition-all border border-white/10">
-                          Back to Explore
-                        </button>
                       </div>
                     )}
                   </Section>
