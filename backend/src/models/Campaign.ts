@@ -14,6 +14,8 @@ export interface ICampaign extends Document {
   backers: Array<{ username: string; amount: number; date: Date }>;
   status: 'Draft' | 'Active' | 'Funded' | 'Failed';
   createdAt: Date;
+  requiredSkills: string[];
+  skillBackers: Array<{ userId: string; username: string; skill: string; hoursPledged: number; estimatedValue: number; status: 'Pending' | 'Approved' | 'Rejected'; date: Date }>;
 }
 
 const CampaignSchema: Schema = new Schema({
@@ -29,7 +31,17 @@ const CampaignSchema: Schema = new Schema({
   stretchGoals: [{ description: String, requiredFunding: Number }],
   backers:      [{ username: String, amount: Number, date: { type: Date, default: Date.now } }],
   status: { type: String, enum: ['Draft', 'Active', 'Funded', 'Failed'], default: 'Draft' },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
+  requiredSkills: [{ type: String }],
+  skillBackers: [{
+    userId: String,
+    username: String,
+    skill: String,
+    hoursPledged: Number,
+    estimatedValue: Number,
+    status: { type: String, enum: ['Pending', 'Approved', 'Rejected'], default: 'Pending' },
+    date: { type: Date, default: Date.now }
+  }]
 });
 
 // Delete cached model to ensure schema changes are picked up in dev

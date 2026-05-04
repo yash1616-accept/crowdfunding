@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
-import { Rocket, Target, Activity, Cpu, Wallet, Banknote, CreditCard, Loader2, Info, LayoutList, ArrowUpRight } from 'lucide-react';
+import { Rocket, Target, Activity, Cpu, Wallet, Banknote, CreditCard, Loader2, Info, LayoutList, ArrowUpRight, Sparkles, Search, Clock, CheckCircle, XCircle, Briefcase } from 'lucide-react';
 import { useUser, useAuth } from '@clerk/clerk-react';
 
 // Error Boundary unchanged
@@ -45,9 +45,17 @@ function DashboardContent() {
   const [blueprint, setBlueprint] = useState('');
   const [fundingGoal, setFundingGoal] = useState<number | ''>('');
   const [category, setCategory] = useState<string>('Tech');
+  const [requiredSkills, setRequiredSkills] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [contactEmail, setContactEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Profile & Matchmaking State
+  const [mySkills, setMySkills] = useState('');
+  const [availability, setAvailability] = useState<number | ''>('');
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [aiMatches, setAiMatches] = useState<any[]>([]);
+  const [myPledges, setMyPledges] = useState<any[]>([]);
 
   // AI Generator State
   const [aiInput, setAiInput] = useState('');
@@ -112,7 +120,106 @@ function DashboardContent() {
         addLog(`Error syncing projects: ${e.message}`);
         setLoadingCampaigns(false);
       });
+
+    // Fetch My Pledges
+    fetch(apiUrl('/api/users/me/pledges'), {
+      headers: {
+        'x-user-id': user.id
+      }
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.pledges) setMyPledges(data.pledges);
+      })
+      .catch(e => console.error('Error fetching pledges:', e));
+
   }, [user?.id, authToken]);
+
+  // Fetch Profile & AI Matches
+  useEffect(() => {
+    if (!user?.primaryEmailAddress?.emailAddress) return;
+    const email = user.primaryEmailAddress.emailAddress;
+    fetch(apiUrl('/api/users/me'), { headers: { 'x-user-email': email } })
+      .then(r => r.json())
+      .then(data => {
+        if (data.user) {
+          setMySkills(data.user.skills?.join(', ') || '');
+          setAvailability(data.user.availability || '');
+        }
+      })
+      .catch(e => console.error('Error fetching profile:', e));
+  }, [user?.primaryEmailAddress?.emailAddress]);
+
+  const saveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingProfile(true);
+    try {
+      const res = await fetch(apiUrl('/api/users/me'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user?.id,
+          email: user?.primaryEmailAddress?.emailAddress,
+          skills: mySkills.split(',').map(s => s.trim()).filter(Boolean),
+          availability: Number(availability) || 0
+        })
+      });
+      if (!res.ok) throw new Error('Failed to save profile');
+      addLog('Profile skills updated successfully.');
+      // After saving, fetch AI matches
+      fetchAiMatches(mySkills.split(',').map(s => s.trim()).filter(Boolean), Number(availability) || 0);
+    } catch (err: any) {
+      addLog(`Profile Error: ${err.message}`);
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
+  const fetchAiMatches = async (skillsArr: string[], avail: number) => {
+    if (skillsArr.length === 0) return;
+    try {
+      const res = await fetch(apiUrl('/api/matchmake'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skills: skillsArr, availability: avail })
+      });
+      const data = await res.json();
+      if (data.matches) setAiMatches(data.matches);
+    } catch (err) {
+      console.error('Matchmaking error', err);
+    }
+  };
+
+  // Initial fetch AI matches if skills exist
+  useEffect(() => {
+    if (mySkills) {
+      fetchAiMatches(mySkills.split(',').map(s => s.trim()).filter(Boolean), Number(availability) || 0);
+    }
+  }, [mySkills, availability]);
+
+  const handleValidateSkill = async (campaignId: string, skillBackerId: string, action: 'Approve' | 'Reject') => {
+    try {
+      const res = await fetch(apiUrl(`/api/campaigns/${campaignId}/validate-skill`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skillBackerId, action })
+      });
+      if (!res.ok) throw new Error('Failed to validate');
+      addLog(`Skill investment ${action.toLowerCase()}d!`);
+      // Update local state to reflect change (basic refresh or map update)
+      setMyCampaigns(prev => prev.map(c => {
+        if (c._id === campaignId) {
+          const updatedBackers = c.skillBackers.map((b: any) => 
+            b._id === skillBackerId ? { ...b, status: action === 'Approve' ? 'Approved' : 'Rejected' } : b
+          );
+          return { ...c, skillBackers: updatedBackers };
+        }
+        return c;
+      }));
+    } catch (err: any) {
+      addLog(`Validation Error: ${err.message}`);
+    }
+  };
 
   // Derived Stats
   const totalRaised = myCampaigns?.reduce((sum, camp) => sum + (camp.currentFunding || 0), 0) || 0;
@@ -170,6 +277,7 @@ function DashboardContent() {
           creatorName: displayName || user?.username || user?.firstName || 'Creator',
           contactEmail: contactEmail || user?.primaryEmailAddress?.emailAddress || '',
           category,
+          requiredSkills: requiredSkills.split(',').map(s => s.trim()).filter(Boolean),
           hook,
           blueprint,
           fundingGoal: Number(fundingGoal),
@@ -190,6 +298,7 @@ function DashboardContent() {
       setHook('');
       setBlueprint('');
       setFundingGoal('');
+      setRequiredSkills('');
 
     } catch (err: any) {
       addLog(`Error: ${err.message}`);
@@ -226,6 +335,145 @@ function DashboardContent() {
           <div className="text-right">
             <p className="text-gray-900 font-medium text-sm">{user?.primaryEmailAddress?.emailAddress}</p>
             <p className="text-xs text-blue-600 font-semibold uppercase mt-1">{(user?.publicMetadata?.role as string) || 'Creator'}</p>
+          </div>
+        </div>
+
+        {/* Skill Investment Hub - Full Width Section */}
+        <div className="bg-gradient-to-br from-[#0a0f1c] to-[#1e1b4b] p-8 rounded-xl shadow-xl border border-indigo-500/20 text-white relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="relative z-10">
+            <div className="flex items-center gap-4 mb-8">
+              <div className="p-3 bg-indigo-500/20 rounded-xl border border-indigo-500/30">
+                <Cpu className="w-6 h-6 text-indigo-300" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-bold text-white">Skill Investment Hub</h2>
+                <p className="text-indigo-200/80 text-sm mt-1">Manage your professional portfolio and discover startups that need your expertise.</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Profile Form */}
+              <div className="bg-white/5 border border-white/10 p-6 rounded-xl backdrop-blur-sm">
+                <h3 className="text-lg font-bold text-white mb-4">My Skills & Availability</h3>
+                <form onSubmit={saveProfile} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-indigo-200 mb-2 uppercase tracking-wider">Skill Portfolio (Comma separated)</label>
+                    <input
+                      type="text"
+                      value={mySkills}
+                      onChange={(e) => setMySkills(e.target.value)}
+                      className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-sm text-white outline-none focus:border-indigo-500 transition-colors"
+                      placeholder="e.g. Graphic Design, Smart Contracts, Marketing"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-indigo-200 mb-2 uppercase tracking-wider">Weekly Availability (Hours)</label>
+                    <input
+                      type="number"
+                      value={availability}
+                      onChange={(e) => setAvailability(e.target.value ? Number(e.target.value) : '')}
+                      className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-sm text-white outline-none focus:border-indigo-500 transition-colors"
+                      placeholder="10"
+                    />
+                  </div>
+                  <div className="pt-2">
+                    <button type="submit" disabled={isSavingProfile} className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20 disabled:opacity-50">
+                      {isSavingProfile ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Update Profile & Refresh Matches'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* AI Matchmaking */}
+              <div className="bg-white/5 border border-white/10 p-6 rounded-xl backdrop-blur-sm flex flex-col h-full">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-400" /> AI Matches
+                  </h3>
+                  <span className="text-xs font-bold px-2 py-1 bg-indigo-500/20 text-indigo-300 rounded border border-indigo-500/30">
+                    {aiMatches.length} Found
+                  </span>
+                </div>
+                
+                {aiMatches.length === 0 ? (
+                  <div className="flex-grow flex flex-col items-center justify-center text-center p-6 border border-dashed border-white/10 rounded-lg bg-black/20">
+                    <Search className="w-8 h-8 text-indigo-500/50 mb-3" />
+                    <p className="text-sm text-indigo-200/70">Update your skills to let our AI match you with live ventures.</p>
+                  </div>
+                ) : (
+                  <div className="flex-grow space-y-3 overflow-y-auto pr-2" style={{ maxHeight: '250px' }}>
+                    {aiMatches.map(match => (
+                      <div key={match._id} className="bg-black/40 border border-white/10 p-4 rounded-lg hover:border-indigo-500/50 transition-colors group">
+                        <div className="flex justify-between items-start mb-2">
+                          <h4 className="font-bold text-white text-sm group-hover:text-indigo-300 transition-colors">{match.hook}</h4>
+                          <a href={`/explore?id=${match._id}`} target="_blank" rel="noreferrer" className="text-[10px] uppercase tracking-wider font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 bg-indigo-500/10 px-2 py-1 rounded">
+                            Review <ArrowUpRight className="w-3 h-3" />
+                          </a>
+                        </div>
+                        <div className="text-xs text-indigo-200/70 mb-2">{match.category}</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {match.requiredSkills?.map((s: string) => (
+                            <span key={s} className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-200 text-[9px] font-bold uppercase tracking-wider border border-indigo-500/20">
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* My Active Pledges Tracker */}
+              <div className="bg-white/5 border border-white/10 p-6 rounded-xl backdrop-blur-sm flex flex-col h-full">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <Briefcase className="w-4 h-4 text-emerald-400" /> My Pledges
+                  </h3>
+                  <span className="text-xs font-bold px-2 py-1 bg-emerald-500/20 text-emerald-300 rounded border border-emerald-500/30">
+                    {myPledges.length} Active
+                  </span>
+                </div>
+                
+                {myPledges.length === 0 ? (
+                  <div className="flex-grow flex flex-col items-center justify-center text-center p-6 border border-dashed border-white/10 rounded-lg bg-black/20">
+                    <Briefcase className="w-8 h-8 text-emerald-500/50 mb-3" />
+                    <p className="text-sm text-indigo-200/70">You haven't invested your skills into any ventures yet.</p>
+                  </div>
+                ) : (
+                  <div className="flex-grow space-y-3 overflow-y-auto pr-2" style={{ maxHeight: '250px' }}>
+                    {myPledges.map(pledge => (
+                      <div key={`${pledge.campaignId}-${pledge.skill}`} className="bg-black/40 border border-white/10 p-4 rounded-lg hover:border-emerald-500/30 transition-colors">
+                        <div className="flex justify-between items-start mb-2">
+                          <h4 className="font-bold text-white text-sm truncate pr-2">{pledge.campaignName}</h4>
+                          <span className={`flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded border ${
+                            pledge.status === 'Approved' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
+                            pledge.status === 'Rejected' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+                            'bg-orange-500/20 text-orange-400 border-orange-500/30'
+                          }`}>
+                            {pledge.status === 'Approved' ? <CheckCircle className="w-3 h-3" /> :
+                             pledge.status === 'Rejected' ? <XCircle className="w-3 h-3" /> :
+                             <Clock className="w-3 h-3" />}
+                            {pledge.status}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-end mt-3">
+                          <div>
+                            <p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mb-0.5">Role</p>
+                            <p className="text-sm text-indigo-200 font-semibold">{pledge.skill}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mb-0.5">Commitment</p>
+                            <p className="text-sm text-emerald-300 font-bold">{pledge.hoursPledged} hrs <span className="text-gray-500 font-normal">/ wk</span></p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -270,23 +518,45 @@ function DashboardContent() {
                       {myCampaigns.map(camp => {
                         const percent = Math.min(100, Math.round((camp.currentFunding / camp.fundingGoal) * 100));
                         return (
-                          <tr key={camp._id} className="hover:bg-gray-50 transition-colors">
-                            <td className="py-4 pl-2">
-                              <p className="font-semibold text-gray-900 text-sm max-w-[200px] truncate">{camp.hook}</p>
-                              <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2">
-                                <div className={`h-1.5 rounded-full ${percent >= 100 ? 'bg-green-500' : 'bg-blue-600'}`} style={{ width: `${percent}%` }}></div>
-                              </div>
-                            </td>
-                            <td className="py-4 text-sm text-gray-600 font-medium">₹{camp.fundingGoal.toLocaleString()}</td>
-                            <td className="py-4 text-sm font-bold text-gray-900">₹{(camp.currentFunding || 0).toLocaleString()}</td>
-                            <td className="py-4 pr-2 text-right">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${camp.status === 'Funded' ? 'bg-green-100 text-green-800' :
-                                  camp.status === 'Active' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
-                                }`}>
-                                {camp.status}
-                              </span>
-                            </td>
-                          </tr>
+                          <React.Fragment key={camp._id}>
+                            <tr className="hover:bg-gray-50 transition-colors">
+                              <td className="py-4 pl-2">
+                                <p className="font-semibold text-gray-900 text-sm max-w-[200px] truncate">{camp.hook}</p>
+                                <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2">
+                                  <div className={`h-1.5 rounded-full ${percent >= 100 ? 'bg-green-500' : 'bg-blue-600'}`} style={{ width: `${percent}%` }}></div>
+                                </div>
+                              </td>
+                              <td className="py-4 text-sm text-gray-600 font-medium">₹{camp.fundingGoal.toLocaleString()}</td>
+                              <td className="py-4 text-sm font-bold text-gray-900">₹{(camp.currentFunding || 0).toLocaleString()}</td>
+                              <td className="py-4 pr-2 text-right">
+                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${camp.status === 'Funded' ? 'bg-green-100 text-green-800' :
+                                    camp.status === 'Active' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
+                                  }`}>
+                                  {camp.status}
+                                </span>
+                              </td>
+                            </tr>
+                            {camp.skillBackers && camp.skillBackers.filter((b: any) => b.status === 'Pending').length > 0 && (
+                              <tr className="bg-orange-50/50">
+                                <td colSpan={4} className="py-3 px-4 border-l-4 border-orange-400">
+                                  <div className="text-xs font-semibold text-orange-800 mb-2">Pending Skill Investments (Action Required)</div>
+                                  <div className="space-y-2">
+                                    {camp.skillBackers.filter((b: any) => b.status === 'Pending').map((backer: any) => (
+                                      <div key={backer._id} className="flex items-center justify-between bg-white p-2 rounded border border-orange-100 shadow-sm">
+                                        <div className="text-sm">
+                                          <span className="font-bold text-gray-900">{backer.username}</span> offers <span className="font-semibold text-blue-600">{backer.hoursPledged} hrs</span> of <span className="font-semibold text-gray-800">{backer.skill}</span> (Value: ₹{backer.estimatedValue})
+                                        </div>
+                                        <div className="flex gap-2">
+                                          <button onClick={() => handleValidateSkill(camp._id, backer._id, 'Approve')} className="px-3 py-1 bg-green-500 hover:bg-green-600 text-white text-xs font-bold rounded">Approve</button>
+                                          <button onClick={() => handleValidateSkill(camp._id, backer._id, 'Reject')} className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white text-xs font-bold rounded">Reject</button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         );
                       })}
                     </tbody>
@@ -372,6 +642,18 @@ function DashboardContent() {
                 </div>
 
                 <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Required Skills (Comma separated)</label>
+                  <input
+                    type="text"
+                    value={requiredSkills}
+                    onChange={(e) => setRequiredSkills(e.target.value)}
+                    className=" text-black w-full px-4 py-3 rounded-lg border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                    placeholder="e.g. React, UI/UX, Marketing"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Allow users to invest their skills in exchange for equity value.</p>
+                </div>
+
+                <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Category</label>
                   <select
                     value={category}
@@ -432,6 +714,8 @@ function DashboardContent() {
                 </div>
               )}
             </div>
+
+
           </div>
 
           {/* Column 2: Payment Module & Logs */}

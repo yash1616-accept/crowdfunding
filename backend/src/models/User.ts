@@ -6,6 +6,8 @@ export interface IUser extends Document {
   role: 'Creator' | 'Backer';
   trustScore: number;
   createdAt: Date;
+  skills: string[];
+  availability: number;
 }
 
 const UserSchema: Schema = new Schema({
@@ -13,7 +15,9 @@ const UserSchema: Schema = new Schema({
   passwordHash: { type: String, required: true },
   role: { type: String, enum: ['Creator', 'Backer'], default: 'Backer' },
   trustScore: { type: Number, default: 100 },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
+  skills: [{ type: String }],
+  availability: { type: Number, default: 0 }
 });
 
 export default mongoose.models.User || mongoose.model<IUser>('User', UserSchema);

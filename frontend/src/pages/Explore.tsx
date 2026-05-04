@@ -8,7 +8,7 @@ import {
   Users, BarChart3, Shield, Globe, Mail, FileText, Zap,
   Star, CreditCard, Lock, ArrowRight, Share2, BookOpen,
   AlertCircle, Wallet, BadgeCheck, Building2, Lightbulb, Heart, Layers,
-  Search, SlidersHorizontal
+  Search, SlidersHorizontal, Cpu
 } from 'lucide-react';
 
 /* ─────────────────────────── Types ─────────────────────────── */
@@ -25,6 +25,7 @@ interface Campaign {
   category: string;
   createdAt?: string;
   backers?: Backer[];
+  requiredSkills?: string[];
 }
 
 /* ─────────────────────────── Design tokens ─────────────────── */
@@ -35,19 +36,19 @@ const CAT: Record<string, {
   bar: string;
   banner: string;
 }> = {
-  Tech:      { icon: Zap,       glow: 'hover:shadow-violet-500/20', pill: 'bg-violet-500/15 text-violet-300 border-violet-500/25', bar: 'from-violet-500 to-indigo-500',  banner: 'from-violet-900/40 via-indigo-900/30 to-transparent' },
-  Creative:  { icon: Lightbulb, glow: 'hover:shadow-rose-500/20',   pill: 'bg-rose-500/15    text-rose-300    border-rose-500/25',    bar: 'from-rose-500 to-pink-500',       banner: 'from-rose-900/40    via-pink-900/30    to-transparent' },
-  Community: { icon: Heart,     glow: 'hover:shadow-emerald-500/20',pill: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/25', bar: 'from-emerald-500 to-teal-500',    banner: 'from-emerald-900/40 via-teal-900/30    to-transparent' },
-  Other:     { icon: Layers,    glow: 'hover:shadow-amber-500/20',  pill: 'bg-amber-500/15   text-amber-300   border-amber-500/25',   bar: 'from-amber-500 to-orange-500',    banner: 'from-amber-900/40   via-orange-900/30  to-transparent' },
+  Tech: { icon: Zap, glow: 'hover:shadow-violet-500/20', pill: 'bg-violet-500/15 text-violet-300 border-violet-500/25', bar: 'from-violet-500 to-indigo-500', banner: 'from-violet-900/40 via-indigo-900/30 to-transparent' },
+  Creative: { icon: Lightbulb, glow: 'hover:shadow-rose-500/20', pill: 'bg-rose-500/15    text-rose-300    border-rose-500/25', bar: 'from-rose-500 to-pink-500', banner: 'from-rose-900/40    via-pink-900/30    to-transparent' },
+  Community: { icon: Heart, glow: 'hover:shadow-emerald-500/20', pill: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/25', bar: 'from-emerald-500 to-teal-500', banner: 'from-emerald-900/40 via-teal-900/30    to-transparent' },
+  Other: { icon: Layers, glow: 'hover:shadow-amber-500/20', pill: 'bg-amber-500/15   text-amber-300   border-amber-500/25', bar: 'from-amber-500 to-orange-500', banner: 'from-amber-900/40   via-orange-900/30  to-transparent' },
 };
 const fallCat = CAT.Other;
 const getCat = (c: string) => CAT[c] ?? fallCat;
 
 const TIERS = [
-  { label: 'Seed',   sub: 'Early backer',      amount: 5000,   equity: 0.01, icon: '🌱', perks: ['Early product access', 'Shareholder certificate', 'Monthly newsletter'] },
-  { label: 'Growth', sub: 'Growth investor',    amount: 25000,  equity: 0.05, icon: '📈', perks: ['All Seed perks', 'Quarterly board update', 'Priority support line'] },
-  { label: 'Lead',   sub: 'Strategic partner',  amount: 100000, equity: 0.15, icon: '🏆', perks: ['All Growth perks', 'Advisory board seat', 'Co-branding rights', 'Direct founder access'] },
-  { label: 'Custom', sub: 'Pay as you wish',    amount: 0,      equity: 0,    icon: '💫', perks: ['Official Backer Certificate', 'Project Updates'] },
+  { label: 'Seed', sub: 'Early backer', amount: 5000, equity: 0.01, icon: '🌱', perks: ['Early product access', 'Shareholder certificate', 'Monthly newsletter'] },
+  { label: 'Growth', sub: 'Growth investor', amount: 25000, equity: 0.05, icon: '📈', perks: ['All Seed perks', 'Quarterly board update', 'Priority support line'] },
+  { label: 'Lead', sub: 'Strategic partner', amount: 100000, equity: 0.15, icon: '🏆', perks: ['All Growth perks', 'Advisory board seat', 'Co-branding rights', 'Direct founder access'] },
+  { label: 'Custom', sub: 'Pay as you wish', amount: 0, equity: 0, icon: '💫', perks: ['Official Backer Certificate', 'Project Updates'] },
 ];
 
 /* ─────────────────────────── Reusable Section ──────────────── */
@@ -68,17 +69,21 @@ function Section({ icon, title, children }: { icon: React.ReactNode; title: stri
 /* ═══════════════════════════ Main Component ════════════════════════════ */
 export default function Explore() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [fundingId, setFundingId] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOption, setSortOption] = useState('Newest');
-  const [selected, setSelected]   = useState<Campaign | null>(null);
+  const [selected, setSelected] = useState<Campaign | null>(null);
   const [selectedTier, setSelectedTier] = useState<number | null>(null);
   const [customAmount, setCustomAmount] = useState<string>('');
   const certRef = useRef<HTMLDivElement>(null);
-  const [step, setStep] = useState<'tiers' | 'form' | 'confirm' | 'done'>('tiers');
+  const [step, setStep] = useState<'tiers' | 'form' | 'confirm' | 'done' | 'skill'>('tiers');
+  const [pledgeSkill, setPledgeSkill] = useState('');
+  const [pledgeHours, setPledgeHours] = useState('');
+  const [pledgeValue, setPledgeValue] = useState('');
+  const [isPledging, setIsPledging] = useState(false);
   const { getToken } = useAuth();
   const { user } = useUser();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -93,8 +98,8 @@ export default function Explore() {
     link.click();
   };
 
-  useEffect(() => { 
-    fetchCampaigns(); 
+  useEffect(() => {
+    fetchCampaigns();
   }, []);
   useEffect(() => {
     document.body.style.overflow = selected ? 'hidden' : '';
@@ -119,6 +124,32 @@ export default function Explore() {
 
   const openPanel = (c: Campaign) => { setSelected(c); setSelectedTier(null); setStep('tiers'); };
   const closePanel = useCallback(() => { setSelected(null); setSelectedTier(null); setStep('tiers'); }, []);
+
+  const handleInvestSkill = async () => {
+    if (!selected || !pledgeSkill || !pledgeHours || !pledgeValue) return;
+    setIsPledging(true);
+    try {
+      const token = await getToken();
+      const res = await fetch(apiUrl(`/api/campaigns/${selected._id}/invest-skill`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          userId: user?.id,
+          username: user?.username || user?.firstName || 'Anonymous',
+          skill: pledgeSkill,
+          hoursPledged: Number(pledgeHours),
+          estimatedValue: Number(pledgeValue)
+        })
+      });
+      if (!res.ok) throw new Error('Failed to pledge skill');
+      alert('Skill pledged successfully! The founder will review it.');
+      setStep('done'); // Or close panel
+    } catch (e) {
+      alert('Failed to pledge skill');
+    } finally {
+      setIsPledging(false);
+    }
+  };
 
   const loadRazorpayScript = () => {
     return new Promise((resolve) => {
@@ -178,18 +209,18 @@ export default function Explore() {
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${freshToken}` },
               body: JSON.stringify({ ...response, amount, backerUsername }),
             });
-            
+
             if (!res.ok) throw new Error('Verification failed on server');
-            
+
             await fetchCampaigns();
-            
+
             // Update the locally selected campaign so the side panel shows the new amount
-            setSelected(prev => prev ? { 
-              ...prev, 
+            setSelected(prev => prev ? {
+              ...prev,
               currentFunding: prev.currentFunding + amount,
               backers: [...(prev.backers || []), { username: backerUsername, amount, date: new Date().toISOString() }]
             } : null);
-            
+
             setStep('done');
           } catch (e) {
             console.error(e);
@@ -211,8 +242,8 @@ export default function Explore() {
       });
       paymentObject.open();
 
-    } catch (e) { 
-      alert('Checkout initialization failed. Please try again.'); 
+    } catch (e) {
+      alert('Checkout initialization failed. Please try again.');
     } finally {
       setFundingId(null);
     }
@@ -270,9 +301,9 @@ export default function Explore() {
 
             <div className="flex items-center gap-1 shrink-0">
               {[
-                { label: 'Active Deals',  value: campaigns.length.toString(), color: 'text-white' },
-                { label: 'Total Raised',  value: `₹${(totalRaised / 1000).toFixed(1)}k`, color: 'text-emerald-400' },
-                { label: 'Fully Funded',  value: campaigns.filter(c => c.status === 'Funded').length.toString(), color: 'text-indigo-400' },
+                { label: 'Active Deals', value: campaigns.length.toString(), color: 'text-white' },
+                { label: 'Total Raised', value: `₹${(totalRaised / 1000).toFixed(1)}k`, color: 'text-emerald-400' },
+                { label: 'Fully Funded', value: campaigns.filter(c => c.status === 'Funded').length.toString(), color: 'text-indigo-400' },
               ].map((s, i) => (
                 <React.Fragment key={i}>
                   {i > 0 && <div className="w-px h-12 bg-white/8 mx-4" />}
@@ -292,17 +323,16 @@ export default function Explore() {
         <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row md:items-center gap-4">
           <div className="flex items-center gap-2.5 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
             {['All', 'Tech', 'Creative', 'Community', 'Other'].map(cat => {
-              const ct   = getCat(cat);
+              const ct = getCat(cat);
               const Icon = cat !== 'All' ? ct.icon : Sparkles;
               const isActive = activeCategory === cat;
               const count = cat === 'All' ? campaigns.length : campaigns.filter(c => c.category === cat).length;
               return (
                 <button key={cat} onClick={() => setActiveCategory(cat)}
-                  className={`shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-250 ${
-                    isActive
-                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30 scale-[1.03]'
-                      : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/8 hover:border-white/15'
-                  }`}>
+                  className={`shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-250 ${isActive
+                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30 scale-[1.03]'
+                    : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/8 hover:border-white/15'
+                    }`}>
                   <Icon className="w-3.5 h-3.5" />
                   {cat}
                   <span className={`text-xs font-bold px-1.5 py-0.5 rounded-md ${isActive ? 'bg-white/20 text-white' : 'bg-white/5 text-gray-600'}`}>{count}</span>
@@ -310,20 +340,20 @@ export default function Explore() {
               );
             })}
           </div>
-          
+
           <div className="flex items-center gap-3 ml-auto shrink-0 w-full md:w-auto">
             <div className="relative flex-grow md:w-64">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-              <input 
-                type="text" 
-                placeholder="Search ventures..." 
+              <input
+                type="text"
+                placeholder="Search ventures..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 focus:border-indigo-500/50 rounded-xl pl-9 pr-4 py-2 text-sm text-white placeholder-gray-500 outline-none transition-all"
               />
             </div>
             <div className="relative">
-              <select 
+              <select
                 value={sortOption}
                 onChange={(e) => setSortOption(e.target.value)}
                 className="appearance-none bg-white/5 border border-white/10 hover:border-white/20 rounded-xl pl-9 pr-8 py-2 text-sm text-white outline-none cursor-pointer transition-all"
@@ -358,10 +388,10 @@ export default function Explore() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
             {filtered.map(campaign => {
-              const pct      = Math.min(100, Math.round((campaign.currentFunding / campaign.fundingGoal) * 100));
+              const pct = Math.min(100, Math.round((campaign.currentFunding / campaign.fundingGoal) * 100));
               const isFunded = campaign.status === 'Funded';
-              const ct       = getCat(campaign.category);
-              const Icon     = ct.icon;
+              const ct = getCat(campaign.category);
+              const Icon = ct.icon;
               const daysLeft = campaign.createdAt
                 ? Math.max(0, 30 - Math.floor((Date.now() - new Date(campaign.createdAt).getTime()) / 86400000))
                 : 30;
@@ -381,11 +411,10 @@ export default function Explore() {
                       <span className={`flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-lg border ${ct.pill}`}>
                         <Icon className="w-3 h-3" /> {campaign.category}
                       </span>
-                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-lg ${
-                        isFunded  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-lg ${isFunded ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
                         : pct >= 75 ? 'bg-amber-500/15   text-amber-400   border border-amber-500/25'
-                                    : 'bg-sky-500/15     text-sky-400     border border-sky-500/25'
-                      }`}>
+                          : 'bg-sky-500/15     text-sky-400     border border-sky-500/25'
+                        }`}>
                         {isFunded ? '✓ Funded' : `${daysLeft}d left`}
                       </span>
                     </div>
@@ -394,9 +423,24 @@ export default function Explore() {
                     <h3 className="text-base font-black text-white leading-snug line-clamp-2 mb-1.5 group-hover:text-indigo-300 transition-colors">
                       {campaign.hook}
                     </h3>
-                    <p className="text-gray-500 text-xs leading-relaxed line-clamp-2 mb-4 flex-grow">
+                    <p className="text-gray-500 text-xs leading-relaxed line-clamp-2 mb-3">
                       {campaign.blueprint}
                     </p>
+
+                    {campaign.requiredSkills && campaign.requiredSkills.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-4 flex-grow content-start">
+                        {campaign.requiredSkills.slice(0, 3).map(skill => (
+                          <span key={skill} className="px-1.5 py-0.5 rounded border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-[10px] font-bold uppercase tracking-wider">
+                            {skill}
+                          </span>
+                        ))}
+                        {campaign.requiredSkills.length > 3 && (
+                          <span className="px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-gray-400 text-[10px] font-bold">
+                            +{campaign.requiredSkills.length - 3}
+                          </span>
+                        )}
+                      </div>
+                    )}
 
                     {/* Creator row */}
                     <div className="flex items-center gap-2 mb-5 bg-white/3 border border-white/6 rounded-xl px-3 py-2">
@@ -426,11 +470,10 @@ export default function Explore() {
                     </div>
 
                     {/* CTA */}
-                    <button className={`w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all duration-200 ${
-                      isFunded
-                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 cursor-default'
-                        : 'bg-white/6 hover:bg-gradient-to-r hover:from-indigo-600 hover:to-violet-600 text-gray-300 hover:text-white border border-white/10 hover:border-transparent hover:shadow-lg hover:shadow-indigo-500/20'
-                    }`}>
+                    <button className={`w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all duration-200 ${isFunded
+                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 cursor-default'
+                      : 'bg-white/6 hover:bg-gradient-to-r hover:from-indigo-600 hover:to-violet-600 text-gray-300 hover:text-white border border-white/10 hover:border-transparent hover:shadow-lg hover:shadow-indigo-500/20'
+                      }`}>
                       {isFunded
                         ? <><CheckCircle className="w-3.5 h-3.5" /> Goal Reached</>
                         : <><ChevronRight className="w-3.5 h-3.5" /> Open Deal Room</>}
@@ -463,7 +506,7 @@ export default function Explore() {
                 <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Deal Room</p>
                 <p className="text-sm font-black text-white truncate">{selected.hook}</p>
               </div>
-              <button onClick={() => { try { navigator.clipboard.writeText(window.location.href); } catch {} }}
+              <button onClick={() => { try { navigator.clipboard.writeText(window.location.href); } catch { } }}
                 className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-500 hover:text-white transition-all" title="Copy link">
                 <Share2 className="w-4 h-4" />
               </button>
@@ -489,11 +532,10 @@ export default function Explore() {
                       <span className={`text-xs font-bold px-2.5 py-0.5 rounded-lg border ${getCat(selected.category).pill}`}>
                         {selected.category}
                       </span>
-                      <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-lg ${
-                        selected.status === 'Funded'
-                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'
-                          : 'bg-sky-500/15 text-sky-400 border border-sky-500/20'
-                      }`}>{selected.status}</span>
+                      <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-lg ${selected.status === 'Funded'
+                        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'
+                        : 'bg-sky-500/15 text-sky-400 border border-sky-500/20'
+                        }`}>{selected.status}</span>
                     </div>
                   </div>
                 </div>
@@ -519,7 +561,7 @@ export default function Explore() {
                         </div>
                         <div className="grid grid-cols-3 gap-3">
                           {[
-                            { label: 'Backers',   value: (selected.backers?.length ?? 0).toString() },
+                            { label: 'Backers', value: (selected.backers?.length ?? 0).toString() },
                             { label: 'Days Left', value: '30' },
                             { label: 'Remaining', value: `₹${Math.max(0, selected.fundingGoal - selected.currentFunding).toLocaleString()}` },
                           ].map(m => (
@@ -586,10 +628,10 @@ export default function Explore() {
                 <Section icon={<FileText className="w-4 h-4 text-indigo-400" />} title="Terms & Conditions">
                   <div className="space-y-2.5 text-xs text-gray-500 leading-relaxed">
                     {[
-                      ['Equity Model',   'Investments provide proportional equity based on contribution vs. funding goal. Final allocation confirmed upon campaign closure.'],
-                      ['Platform Fee',   'A 5% protocol fee is deducted from total raised. Net proceeds disbursed to creator upon campaign success.'],
-                      ['No Guarantee',   'Investments carry business risk. Past creator performance does not guarantee future results.'],
-                      ['Refund Policy',  'If a campaign misses its goal, all contributions are automatically refunded within 7 business days.'],
+                      ['Equity Model', 'Investments provide proportional equity based on contribution vs. funding goal. Final allocation confirmed upon campaign closure.'],
+                      ['Platform Fee', 'A 5% protocol fee is deducted from total raised. Net proceeds disbursed to creator upon campaign success.'],
+                      ['No Guarantee', 'Investments carry business risk. Past creator performance does not guarantee future results.'],
+                      ['Refund Policy', 'If a campaign misses its goal, all contributions are automatically refunded within 7 business days.'],
                       ['Data & Privacy', 'Your username and amount are permanently logged on the project ledger for full transparency.'],
                     ].map(([title, body]) => (
                       <div key={title} className="bg-white/3 border border-white/5 rounded-xl px-4 py-3">
@@ -639,38 +681,108 @@ export default function Explore() {
                                 </div>
                                 <div className={`w-4 h-4 rounded-full border-2 shrink-0 mt-1 transition-all ${isSelected ? 'border-indigo-500 bg-indigo-500' : 'border-white/20'}`} />
                               </div>
-                              
+
                               {/* Custom Input */}
                               {isCustom && isSelected && (
                                 <div className="mt-4 pt-4 border-t border-white/10">
                                   <label className="block text-xs font-semibold text-gray-400 mb-2">Enter Amount (₹)</label>
                                   <div className="relative">
                                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">₹</span>
-                                    <input 
-                                      type="number" 
-                                      value={customAmount} 
+                                    <input
+                                      type="number"
+                                      value={customAmount}
                                       onChange={(e) => setCustomAmount(e.target.value)}
                                       placeholder="100+"
                                       className="w-full bg-black/40 border border-white/10 rounded-xl py-3 pl-8 pr-4 text-white font-bold outline-none focus:border-indigo-500 transition-colors"
                                     />
                                   </div>
                                   {Number(customAmount) > 0 && Number(customAmount) < 100 && (
-                                    <p className="text-red-400 text-xs mt-2 flex items-center gap-1"><AlertCircle className="w-3 h-3"/> Minimum investment is ₹100</p>
+                                    <p className="text-red-400 text-xs mt-2 flex items-center gap-1"><AlertCircle className="w-3 h-3" /> Minimum investment is ₹100</p>
                                   )}
                                   {Number(customAmount) > (selected.fundingGoal - selected.currentFunding) && (
-                                    <p className="text-red-400 text-xs mt-2 flex items-center gap-1"><AlertCircle className="w-3 h-3"/> Cannot exceed remaining goal (₹{(selected.fundingGoal - selected.currentFunding).toLocaleString()})</p>
+                                    <p className="text-red-400 text-xs mt-2 flex items-center gap-1"><AlertCircle className="w-3 h-3" /> Cannot exceed remaining goal (₹{(selected.fundingGoal - selected.currentFunding).toLocaleString()})</p>
                                   )}
                                 </div>
                               )}
                             </div>
                           );
                         })}
-                        <button 
-                          disabled={selectedTier === null || (TIERS[selectedTier].label === 'Custom' && (Number(customAmount) < 100 || Number(customAmount) > (selected.fundingGoal - selected.currentFunding)))} 
+                        <button
+                          disabled={selectedTier === null || (TIERS[selectedTier].label === 'Custom' && (Number(customAmount) < 100 || Number(customAmount) > (selected.fundingGoal - selected.currentFunding)))}
                           onClick={() => setStep('form')}
                           className="w-full py-3 rounded-2xl font-bold text-sm bg-gradient-to-r from-indigo-600 to-violet-600 text-white hover:opacity-90 transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20">
                           Proceed to Payment <ArrowRight className="w-4 h-4" />
                         </button>
+
+                        {selected.requiredSkills && selected.requiredSkills.length > 0 && (
+                          <div className="pt-2 border-t border-white/10 mt-4 text-center">
+                            <p className="text-xs text-gray-400 mb-2">Or invest your time and expertise for equity.</p>
+                            <button
+                              onClick={() => setStep('skill')}
+                              className="w-full py-3 rounded-2xl font-bold text-sm bg-white/5 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-500/10 transition-all flex items-center justify-center gap-2">
+                              <Cpu className="w-4 h-4" /> Invest Skills Instead
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Step - Skill Investment */}
+                    {step === 'skill' && (
+                      <div className="space-y-4">
+                        <div className="bg-gradient-to-br from-indigo-500/12 to-violet-500/8 border border-indigo-500/20 rounded-2xl p-5">
+                          <h4 className="font-black text-white text-base mb-2">Pledge Your Skills</h4>
+                          <p className="text-xs text-indigo-300 leading-relaxed">
+                            Contribute your expertise instead of capital. The founder will review your offer and, if accepted, your contribution will be recorded as equity value.
+                          </p>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-400 mb-1.5">Select a needed skill</label>
+                          <select
+                            value={pledgeSkill}
+                            onChange={e => setPledgeSkill(e.target.value)}
+                            className="w-full bg-white/4 border border-white/10 rounded-xl px-4 py-3 text-sm text-black outline-none focus:border-indigo-500 transition-colors">
+                            <option value="" className="bg-[#0e1220]">-- Select Skill --</option>
+                            {selected.requiredSkills?.map((s: string) => (
+                              <option key={s} value={s} className="bg-[#0e1220]">{s}</option>
+                            ))}
+                            <option value="Other" className="bg-[#0e1220]">Other (Specify later)</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-400 mb-1.5">Hours Pledged</label>
+                          <input
+                            type="number" min="1"
+                            value={pledgeHours}
+                            onChange={e => setPledgeHours(e.target.value)}
+                            placeholder="e.g. 20"
+                            className="w-full bg-white/4 border border-white/10 rounded-xl px-4 py-3 text-sm text-black outline-none focus:border-indigo-500 transition-colors"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-400 mb-1.5">Estimated Value (₹)</label>
+                          <input
+                            type="number" min="1"
+                            value={pledgeValue}
+                            onChange={e => setPledgeValue(e.target.value)}
+                            placeholder="e.g. 50000"
+                            className="w-full bg-white/4 border border-white/10 rounded-xl px-4 py-3 text-sm text-black outline-none focus:border-indigo-500 transition-colors"
+                          />
+                          <p className="text-[10px] text-gray-500 mt-1">Value of your time in rupees for equity calculation.</p>
+                        </div>
+
+                        <div className="flex gap-3 pt-2">
+                          <button onClick={() => setStep('tiers')} className="flex-1 py-3 rounded-2xl text-sm font-semibold bg-white/6 hover:bg-white/10 text-gray-400 transition-all border border-white/8">Back</button>
+                          <button
+                            disabled={isPledging || !pledgeSkill || !pledgeHours || !pledgeValue}
+                            onClick={handleInvestSkill}
+                            className="flex-1 py-3 rounded-2xl text-sm font-bold bg-gradient-to-r from-indigo-600 to-violet-600 text-white hover:opacity-90 transition-all flex items-center justify-center gap-2 shadow-lg disabled:opacity-50">
+                            {isPledging ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Submit Pledge'}
+                          </button>
+                        </div>
                       </div>
                     )}
 
@@ -702,7 +814,7 @@ export default function Explore() {
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <input disabled placeholder="MM / YY" className="bg-white/4 border border-white/8 rounded-xl px-4 py-3 text-sm text-gray-600 cursor-not-allowed outline-none" />
-                          <input disabled placeholder="CVV •••"  className="bg-white/4 border border-white/8 rounded-xl px-4 py-3 text-sm text-gray-600 cursor-not-allowed outline-none" />
+                          <input disabled placeholder="CVV •••" className="bg-white/4 border border-white/8 rounded-xl px-4 py-3 text-sm text-gray-600 cursor-not-allowed outline-none" />
                         </div>
                         <div className="flex items-start gap-2.5 text-xs text-gray-600 bg-white/3 border border-white/6 rounded-xl px-4 py-3">
                           <Lock className="w-3.5 h-3.5 text-gray-600 shrink-0 mt-0.5" />
@@ -723,14 +835,14 @@ export default function Explore() {
                         <h4 className="font-black text-white text-sm">Confirm Your Investment</h4>
                         <div className="space-y-2.5 text-sm">
                           {(() => {
-                             const amt = TIERS[selectedTier].label === 'Custom' ? Number(customAmount) : TIERS[selectedTier].amount;
-                             const eq = TIERS[selectedTier].label === 'Custom' ? ((amt / selected.fundingGoal) * 100).toFixed(4) : TIERS[selectedTier].equity;
-                             return ([
-                              ['Tier',            TIERS[selectedTier].label,                                            'text-white'],
-                              ['Amount',          `₹${amt.toLocaleString()}`,                    'text-white'],
-                              ['Equity',          `${eq}%`,                                    'text-indigo-400'],
-                              ['Project Share',   `~${((amt / selected.fundingGoal) * 100).toFixed(4)}%`, 'text-gray-300'],
-                              ['Platform Fee 5%', `₹${(amt * 0.05).toLocaleString()}`,           'text-gray-400'],
+                            const amt = TIERS[selectedTier].label === 'Custom' ? Number(customAmount) : TIERS[selectedTier].amount;
+                            const eq = TIERS[selectedTier].label === 'Custom' ? ((amt / selected.fundingGoal) * 100).toFixed(4) : TIERS[selectedTier].equity;
+                            return ([
+                              ['Tier', TIERS[selectedTier].label, 'text-white'],
+                              ['Amount', `₹${amt.toLocaleString()}`, 'text-white'],
+                              ['Equity', `${eq}%`, 'text-indigo-400'],
+                              ['Project Share', `~${((amt / selected.fundingGoal) * 100).toFixed(4)}%`, 'text-gray-300'],
+                              ['Platform Fee 5%', `₹${(amt * 0.05).toLocaleString()}`, 'text-gray-400'],
                             ] as [string, string, string][]).map(([label, val, cls]) => (
                               <div key={label} className="flex justify-between items-center">
                                 <span className="text-gray-500">{label}</span>
@@ -758,7 +870,7 @@ export default function Explore() {
                     {/* Step 4 – Done */}
                     {step === 'done' && (
                       <div className="space-y-4">
-                        <div 
+                        <div
                           ref={certRef}
                           className="relative bg-gradient-to-br from-[#0a0f1c] to-[#0d1424] border-2 border-[#1e293b] rounded-xl p-8 overflow-hidden"
                           style={{ width: '100%', minHeight: '400px' }}
@@ -767,7 +879,7 @@ export default function Explore() {
                           <div className="absolute top-0 left-0 w-full h-full border-[6px] border-double border-indigo-500/20 rounded-xl pointer-events-none" />
                           <div className="absolute -top-20 -right-20 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl" />
                           <div className="absolute -bottom-20 -left-20 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl" />
-                          
+
                           <div className="relative z-10 flex flex-col h-full justify-between text-center space-y-6">
                             <div>
                               <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-[0_0_30px_rgba(99,102,241,0.3)]">
@@ -776,7 +888,7 @@ export default function Explore() {
                               <h2 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 to-violet-300 tracking-widest uppercase" style={{ fontFamily: 'serif' }}>Certificate of Investment</h2>
                               <p className="text-indigo-500/60 text-xs tracking-[0.2em] mt-1 font-bold">OFFICIAL BACKER DOCUMENT</p>
                             </div>
-                            
+
                             <div className="space-y-4">
                               <p className="text-gray-400 italic text-sm">This formally certifies that</p>
                               <h3 className="text-3xl font-black text-white">{user?.username || user?.firstName || 'Esteemed Investor'}</h3>
@@ -787,7 +899,7 @@ export default function Explore() {
                               <p className="text-gray-400 italic text-sm">into the venture known as</p>
                               <h4 className="text-xl font-bold text-indigo-100">{selected.hook}</h4>
                             </div>
-                            
+
                             <div className="flex justify-between items-end border-t border-indigo-500/20 pt-6 mt-6">
                               <div className="text-left">
                                 <p className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-1">Equity Stake</p>
@@ -806,7 +918,7 @@ export default function Explore() {
                             </div>
                           </div>
                         </div>
-                        
+
                         <div className="flex gap-3 mt-4">
                           <button onClick={closePanel} className="flex-1 py-3 rounded-2xl text-sm font-semibold bg-white/6 hover:bg-white/10 text-gray-300 transition-all border border-white/8">
                             Close Panel
