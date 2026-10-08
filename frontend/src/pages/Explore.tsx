@@ -229,7 +229,7 @@ export default function Explore() {
         },
         prefill: {
           name: backerUsername,
-          email: user?.primaryEmailAddress?.emailAddress || '',
+          ...(user?.primaryEmailAddress?.emailAddress ? { email: user.primaryEmailAddress.emailAddress } : {})
         },
         theme: {
           color: '#4f46e5', // Indigo 600
